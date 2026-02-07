@@ -7,6 +7,19 @@ pragma solidity ^0.8.19;
  */
 contract EscrowWork {
     
+    error OnlyPoster();
+    error OnlyWorker();
+    error TaskDoesNotExist();
+    error RewardMustBeGreaterThanZero();
+    error DescriptionCannotBeEmpty();
+    error TaskNotOpen();
+    error PosterCannotAcceptOwnTask();
+    error TaskMustBeAccepted();
+    error TaskMustBeCompleted();
+    error PaymentTransferFailed();
+    error CanOnlyCancelOpenTasks();
+    error RefundTransferFailed();
+    
     enum TaskStatus {
         Open,           // Task posted, accepting workers
         Accepted,       // Worker accepted the task
@@ -41,17 +54,17 @@ contract EscrowWork {
     
     // Modifiers
     modifier onlyPoster(uint256 _taskId) {
-        require(tasks[_taskId].poster == msg.sender, "Only poster can call this");
+        if(tasks[_taskId].poster != msg.sender) revert OnlyPoster();
         _;
     }
     
     modifier onlyWorker(uint256 _taskId) {
-        require(tasks[_taskId].worker == msg.sender, "Only assigned worker can call this");
+        if(tasks[_taskId].worker != msg.sender) revert OnlyWorker();
         _;
     }
     
     modifier taskExists(uint256 _taskId) {
-        require(_taskId < taskCounter, "Task does not exist");
+        if(_taskId >= taskCounter) revert TaskDoesNotExist();
         _;
     }
     
@@ -60,8 +73,8 @@ contract EscrowWork {
      * @param _description Description of the task
      */
     function postTask(string memory _description) external payable {
-        require(msg.value > 0, "Reward must be greater than 0");
-        require(bytes(_description).length > 0, "Description cannot be empty");
+        if(msg.value == 0) revert RewardMustBeGreaterThanZero();
+        if(bytes(_description).length == 0) revert DescriptionCannotBeEmpty();
         
         tasks[taskCounter] = Task({
             id: taskCounter,
@@ -86,8 +99,8 @@ contract EscrowWork {
     function acceptTask(uint256 _taskId) external taskExists(_taskId) {
         Task storage task = tasks[_taskId];
         
-        require(task.status == TaskStatus.Open, "Task is not open");
-        require(task.poster != msg.sender, "Poster cannot accept their own task");
+        if(task.status != TaskStatus.Open) revert TaskNotOpen();
+        if(task.poster == msg.sender) revert PosterCannotAcceptOwnTask();
         
         task.worker = msg.sender;
         task.status = TaskStatus.Accepted;
@@ -103,7 +116,7 @@ contract EscrowWork {
     function completeTask(uint256 _taskId) external taskExists(_taskId) onlyWorker(_taskId) {
         Task storage task = tasks[_taskId];
         
-        require(task.status == TaskStatus.Accepted, "Task must be in accepted state");
+        if(task.status != TaskStatus.Accepted) revert TaskMustBeAccepted();
         
         task.status = TaskStatus.Completed;
         task.completedAt = block.timestamp;
@@ -118,7 +131,7 @@ contract EscrowWork {
     function confirmCompletion(uint256 _taskId) external taskExists(_taskId) onlyPoster(_taskId) {
         Task storage task = tasks[_taskId];
         
-        require(task.status == TaskStatus.Completed, "Task must be completed by worker first");
+        if(task.status != TaskStatus.Completed) revert TaskMustBeCompleted();
         
         task.status = TaskStatus.Confirmed;
         
@@ -127,7 +140,7 @@ contract EscrowWork {
         task.reward = 0; // Prevent re-entrancy
         
         (bool success, ) = task.worker.call{value: reward}("");
-        require(success, "Payment transfer failed");
+        if(!success) revert PaymentTransferFailed();
         
         emit TaskConfirmed(_taskId, msg.sender, task.worker, reward);
     }
@@ -139,10 +152,7 @@ contract EscrowWork {
     function cancelTask(uint256 _taskId) external taskExists(_taskId) onlyPoster(_taskId) {
         Task storage task = tasks[_taskId];
         
-        require(
-            task.status == TaskStatus.Open, 
-            "Can only cancel open tasks"
-        );
+        if(task.status != TaskStatus.Open) revert CanOnlyCancelOpenTasks();
         
         task.status = TaskStatus.Cancelled;
         
@@ -151,7 +161,7 @@ contract EscrowWork {
         task.reward = 0; // Prevent re-entrancy
         
         (bool success, ) = task.poster.call{value: refund}("");
-        require(success, "Refund transfer failed");
+        if(!success) revert RefundTransferFailed();
         
         emit TaskCancelled(_taskId, msg.sender);
     }
@@ -163,7 +173,7 @@ contract EscrowWork {
     function withdrawFromTask(uint256 _taskId) external taskExists(_taskId) onlyWorker(_taskId) {
         Task storage task = tasks[_taskId];
         
-        require(task.status == TaskStatus.Accepted, "Task must be in accepted state");
+        if(task.status != TaskStatus.Accepted) revert TaskMustBeAccepted();
         
         task.status = TaskStatus.Open;
         task.worker = address(0);
