@@ -1,4 +1,4 @@
-# TaskMarketplace Smart Contract
+# EscrowWork Smart Contract
 
 A decentralized task marketplace similar to TaskRabbit, built with Solidity.
 
